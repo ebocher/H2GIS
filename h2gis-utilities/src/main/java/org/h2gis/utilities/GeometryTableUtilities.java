@@ -30,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
+import org.locationtech.jts.geom.GeometryFactory;
 
 /**
  *
@@ -580,11 +581,11 @@ public class GeometryTableUtilities {
      *
      * @param resultSet ResultSet to analyse
      *
-     * @return The full envelope of the ResultSet
+     * @return A geometry that represents the full extend of the first geometry column in the ResultSet
      *
      * @throws SQLException
      */
-    public static Envelope getEnvelope(ResultSet resultSet) throws SQLException {
+    public static Geometry getEnvelope(ResultSet resultSet) throws SQLException {
         return getEnvelope(resultSet, getFirstGeometryColumnNameAndIndex(resultSet).first());
 
     }
@@ -592,25 +593,38 @@ public class GeometryTableUtilities {
     /**
      * Compute the full extend of a ResultSet using a specified geometry column.
      * If the ResultSet does not contain this geometry field throw an exception
+     * If the geometries don't have the same SRID throw an exception
      *
      * @param resultSet ResultSet to analyse
      * @param geometryColumnName Field to analyse
      *
-     * @return The full extend of the field in the ResultSet
+     * @return A geometry that represents the full extend of a geometry column in the ResultSet
      *
      * @throws SQLException
      */
-    public static Envelope getEnvelope(ResultSet resultSet, String geometryColumnName) throws SQLException {
+    public static Geometry getEnvelope(ResultSet resultSet, String geometryColumnName) throws SQLException {
         Envelope aggregatedEnvelope = null;
-        while (resultSet.next()) {
-            Geometry geom = (Geometry) resultSet.getObject(geometryColumnName);
-            if (aggregatedEnvelope != null) {
-                aggregatedEnvelope.expandToInclude(geom.getEnvelopeInternal());
-            } else {
-                aggregatedEnvelope = geom.getEnvelopeInternal();
-            }
+        int firstSRID;
+        //First one
+        resultSet.next();
+        Geometry geom = (Geometry) resultSet.getObject(geometryColumnName);
+        firstSRID = geom.getSRID();
+        if (aggregatedEnvelope != null) {
+            aggregatedEnvelope.expandToInclude(geom.getEnvelopeInternal());
+        } else {
+            aggregatedEnvelope = geom.getEnvelopeInternal();
         }
-        return aggregatedEnvelope;
+        //Next
+        while (resultSet.next()) {
+            geom = (Geometry) resultSet.getObject(geometryColumnName);
+            if(geom.getSRID()!=firstSRID){
+                throw new SQLException("The envelope cannot be computed on mixed SRID");
+            }
+            aggregatedEnvelope.expandToInclude(geom.getEnvelopeInternal());
+        }
+        Geometry geomEnv = new GeometryFactory().toGeometry(aggregatedEnvelope);
+        geomEnv.setSRID(firstSRID);
+        return geomEnv;
     }
 
     /**
@@ -649,8 +663,26 @@ public class GeometryTableUtilities {
     public static Geometry getEstimatedExtent(Connection connection, TableLocation tableLocation, String geometryColumnName) throws SQLException {
         Geometry result;
         int srid = getSRID(connection, tableLocation, geometryColumnName);
+        boolean isH2 = JDBCUtilities.isH2DataBase(connection);
+        if (!isH2) {
+            StringBuilder query = new StringBuilder("SELECT  ST_EstimatedExtent(");
+            if(tableLocation.getSchema()!=null){
+                query.append("'").append(tableLocation.getSchema()).append("',");
+            }
+            query.append("'").append(tableLocation.getTable()).append("','").append(geometryColumnName).append("') :: geometry");
+            try (ResultSet rs = connection.createStatement().executeQuery(query.toString())) {
+                if (rs.next()) {
+                    result =  ((Geometry) rs.getObject(1));
+                    if(result!=null) {
+                        result.setSRID(srid);
+                    }
+                    return result;
+                }
+            }
+        }
+        else{
         StringBuilder query = new StringBuilder("SELECT  ESTIMATED_ENVELOPE('");
-        query.append(tableLocation.getTable()).append("','").append(geometryColumnName).append("')");
+        query.append(tableLocation.toString(isH2)).append("','").append(geometryColumnName).append("')");
         try (ResultSet rs = connection.createStatement().executeQuery(query.toString())) {
             if (rs.next()) {
                 result = (Geometry) rs.getObject(1);
@@ -670,6 +702,7 @@ public class GeometryTableUtilities {
                     return result;
                 }
             }
+        }
         }
 
         throw new SQLException("Unable to compute the estimated extent");
@@ -874,12 +907,12 @@ public class GeometryTableUtilities {
      * @param geometryField Geometry field or empty string (take the first
      * geometry field)
      *
-     * @return Envelope of the table
+     * @return Envelope of the table as Geometry
      *
      * @throws SQLException If the table not exists, empty or geometry field
      * empty.
      */
-    public static Envelope getEnvelope(Connection connection, TableLocation location, String geometryField)
+    public static Geometry getEnvelope(Connection connection, TableLocation location, String geometryField)
             throws SQLException {
         if (geometryField == null || geometryField.isEmpty()) {
             throw new SQLException("The table " + location + " does not contain a Geometry field, then the extent "
@@ -890,19 +923,20 @@ public class GeometryTableUtilities {
             try (ResultSet rs = connection.createStatement().executeQuery("SELECT ST_Extent("
                     + TableLocation.quoteIdentifier(geometryField) + ") as ext FROM " + location)) {
                 if (rs.next()) {
-                    return ((Geometry) rs.getObject(1)).getEnvelopeInternal();
+                    return ((Geometry) rs.getObject(1));
                 }
             }
         } else {
             try (ResultSet rs = connection.createStatement().executeQuery("SELECT ST_SetSRID(ST_Extent("
-                    + TableLocation.quoteIdentifier(geometryField) + "), ST_SRID(" + TableLocation.quoteIdentifier(geometryField) + ")) as ext FROM " + location)) {
+                    + TableLocation.quoteIdentifier(geometryField) + "), MAX(ST_SRID(" + TableLocation.quoteIdentifier(geometryField) + "))) as ext FROM " + location)) {
                 if (rs.next()) {
-                    return ((Geometry) rs.getObject(1)).getEnvelopeInternal();
+                    return ((Geometry) rs.getObject(1));
                 }
             }
         }
         throw new SQLException("Unable to get the table extent it may be empty");
     }
+
 
     /**
      * Merge the bounding box of all geometries inside the provided table.
@@ -912,12 +946,12 @@ public class GeometryTableUtilities {
      * @param connection Active connection (not closed by this function)
      * @param location Location of the table
      *
-     * @return Envelope of the table
+     * @return Envelope of the table as Geometry
      *
      * @throws SQLException If the table not exists, empty or does not contain a
      * geometry field.
      */
-    public static Envelope getEnvelope(Connection connection, TableLocation location)
+    public static Geometry getEnvelope(Connection connection, TableLocation location)
             throws SQLException {
         LinkedHashMap<String, Integer> geometryFields = GeometryTableUtilities.getGeometryColumnNamesAndIndexes(connection, location);
         if (geometryFields.isEmpty()) {
@@ -926,6 +960,7 @@ public class GeometryTableUtilities {
         }
         return getEnvelope(connection, location, geometryFields.keySet().stream().findFirst().get());
     }
+
 
     /**
      * Return an array of two string that correspond to the authority name and

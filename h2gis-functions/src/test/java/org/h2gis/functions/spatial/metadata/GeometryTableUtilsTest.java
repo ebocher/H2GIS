@@ -20,6 +20,7 @@
 package org.h2gis.functions.spatial.metadata;
 
 import org.h2gis.functions.factory.H2GISDBFactory;
+import org.h2gis.postgis_jts_osgi.DataSourceFactoryImpl;
 import org.junit.jupiter.api.*;
 
 import java.sql.Connection;
@@ -27,11 +28,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
+
 import org.h2.jdbc.JdbcSQLException;
 import org.h2gis.utilities.GeometryMetaData;
 import org.h2gis.utilities.GeometryTableUtilities;
@@ -42,6 +40,9 @@ import org.h2gis.utilities.Tuple;
 import static org.junit.jupiter.api.Assertions.*;
 import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.Geometry;
+import org.osgi.service.jdbc.DataSourceFactory;
+
+import javax.sql.DataSource;
 
 public class GeometryTableUtilsTest {
 
@@ -62,9 +63,9 @@ public class GeometryTableUtilsTest {
         connection.createStatement().execute("INSERT INTO POINTTABLE VALUES ('POINT(1 1)')");
 
         connection.createStatement().execute("DROP TABLE IF EXISTS GEOMTABLE");
-        connection.createStatement().execute("CREATE TABLE GEOMTABLE (geom GEOMETRY, pt GEOMETRY(  POINTZM    ), linestr LINESTRING, "
-                + "plgn POLYGON, multipt MULTIPOINT, multilinestr MULTILINESTRING, multiplgn MULTIPOLYGON, "
-                + "geomcollection GEOMCOLLECTION)");
+        connection.createStatement().execute("CREATE TABLE GEOMTABLE (geom GEOMETRY, pt GEOMETRY(POINTZM), linestr GEOMETRY(LINESTRING), "
+                + "plgn GEOMETRY(POLYGON), multipt GEOMETRY(MULTIPOINT), multilinestr GEOMETRY(MULTILINESTRING), multiplgn GEOMETRY(MULTIPOLYGON), "
+                + "geomcollection GEOMETRY(GEOMETRYCOLLECTION))");
         connection.createStatement().execute("INSERT INTO GEOMTABLE VALUES ('POINT(1 1)', 'POINT(1 1 0 0)',"
                 + " 'LINESTRING(1 1, 2 2)', 'POLYGON((1 1, 1 2, 2 2, 2 1, 1 1))', 'MULTIPOINT((1 1))',"
                 + " 'MULTILINESTRING((1 1, 2 2))', 'MULTIPOLYGON(((1 1, 1 2, 2 2, 2 1, 1 1)))',"
@@ -223,7 +224,7 @@ public class GeometryTableUtilsTest {
         ResultSet rs = st.executeQuery("SELECT * from POINT3D;");
         Tuple<String, Integer> geomField = GeometryTableUtilities.getFirstGeometryColumnNameAndIndex(rs);
         assertEquals("THE_GEOM", geomField.first());
-        assertEquals(1, geomField.second());
+        assertEquals(2, geomField.second());
     }
 
     @Test
@@ -328,7 +329,7 @@ public class GeometryTableUtilsTest {
         geomColumns.add("MULTIPLGN");
         ResultSet rs = st.executeQuery("SELECT GEOM, PT,  MULTIPLGN FROM GEOMTABLE");
         List<String> geomFieldNameIndex = GeometryTableUtilities.getGeometryColumnNames(rs.getMetaData());
-        assertEquals(8, geomFieldNameIndex.size());
+        assertEquals(3, geomFieldNameIndex.size());
         assertNotNull(geomFieldNameIndex.stream()
                 .filter(columName -> geomColumns.contains(columName))
                 .findAny()
@@ -452,24 +453,24 @@ public class GeometryTableUtilsTest {
     @Test
     public void testTableEnvelope() throws SQLException {
         TableLocation tableLocation = TableLocation.parse("GEOMTABLE");
+        assertThrows(SQLException.class, ()
+                -> GeometryTableUtilities.getEnvelope(connection, tableLocation, ""));
         assertEquals(new Envelope(1.0, 2.0, 1.0, 2.0),
-                GeometryTableUtilities.getEnvelope(connection, tableLocation, ""));
+                GeometryTableUtilities.getEnvelope(connection, tableLocation, "GEOM").getEnvelopeInternal());
         assertEquals(new Envelope(1.0, 2.0, 1.0, 2.0),
-                GeometryTableUtilities.getEnvelope(connection, tableLocation, "GEOM"));
+                GeometryTableUtilities.getEnvelope(connection, tableLocation, "PT").getEnvelopeInternal());
         assertEquals(new Envelope(1.0, 2.0, 1.0, 2.0),
-                GeometryTableUtilities.getEnvelope(connection, tableLocation, "PT"));
-        assertEquals(new Envelope(1.0, 2.0, 1.0, 2.0),
-                GeometryTableUtilities.getEnvelope(connection, tableLocation, "LINESTR"));
+                GeometryTableUtilities.getEnvelope(connection, tableLocation, "LINESTR").getEnvelopeInternal());
         assertEquals(new Envelope(1.0, 3.0, 1.0, 3.0),
-                GeometryTableUtilities.getEnvelope(connection, tableLocation, "PLGN"));
+                GeometryTableUtilities.getEnvelope(connection, tableLocation, "PLGN").getEnvelopeInternal());
         assertEquals(new Envelope(1.0, 3.0, 1.0, 3.0),
-                GeometryTableUtilities.getEnvelope(connection, tableLocation, "MULTIPT"));
+                GeometryTableUtilities.getEnvelope(connection, tableLocation, "MULTIPT").getEnvelopeInternal());
         assertEquals(new Envelope(1.0, 3.0, 1.0, 3.0),
-                GeometryTableUtilities.getEnvelope(connection, tableLocation, "MULTILINESTR"));
+                GeometryTableUtilities.getEnvelope(connection, tableLocation, "MULTILINESTR").getEnvelopeInternal());
         assertEquals(new Envelope(1.0, 3.0, 1.0, 3.0),
-                GeometryTableUtilities.getEnvelope(connection, tableLocation, "MULTIPLGN"));
+                GeometryTableUtilities.getEnvelope(connection, tableLocation, "MULTIPLGN").getEnvelopeInternal());
         assertEquals(new Envelope(1.0, 3.0, 1.0, 3.0),
-                GeometryTableUtilities.getEnvelope(connection, tableLocation, "GEOMCOLLECTION"));
+                GeometryTableUtilities.getEnvelope(connection, tableLocation, "GEOMCOLLECTION").getEnvelopeInternal());
     }
 
     @Test
@@ -495,6 +496,61 @@ public class GeometryTableUtilsTest {
         TableLocation tableLocation = TableLocation.parse("GEOMTABLE_INDEX");
         assertEquals(new Envelope(150.0, 240.0, 250.0, 360.0),
                 GeometryTableUtilities.getEstimatedExtent(connection, tableLocation, "THE_GEOM").getEnvelopeInternal());
+    }
+
+    @Test
+    public void testEstimatedExtentSchema() throws SQLException {
+        Statement st = connection.createStatement();
+        st.execute("DROP SCHEMA IF EXISTS MYSCHEMA; CREATE SCHEMA MYSCHEMA; DROP TABLE IF EXISTS MYSCHEMA.GEOMTABLE_INDEX; CREATE TABLE MYSCHEMA.GEOMTABLE_INDEX (THE_GEOM GEOMETRY);");
+        st.execute("INSERT INTO MYSCHEMA.GEOMTABLE_INDEX VALUES ('POLYGON ((150 360, 200 360, 200 310, 150 310, 150 360))'),('POLYGON ((195.5 279, 240 279, 240 250, 195.5 250, 195.5 279))' )");
+        st.execute("CREATE SPATIAL INDEX ON MYSCHEMA.GEOMTABLE_INDEX(THE_GEOM)");
+        TableLocation tableLocation = TableLocation.parse("MYSCHEMA.GEOMTABLE_INDEX");
+        assertEquals(new Envelope(150.0, 240.0, 250.0, 360.0),
+                GeometryTableUtilities.getEstimatedExtent(connection, tableLocation, "THE_GEOM").getEnvelopeInternal());
+    }
+
+    @Disabled
+    @Test
+    public void testEstimatedExtentSchemaPostGIS() throws SQLException {
+        String url = "jdbc:postgresql://?/?";
+        Properties props = new Properties();
+        props.setProperty("user", "");
+        props.setProperty("password", "");
+        props.setProperty("url", url);
+        DataSourceFactory dataSourceFactory = new DataSourceFactoryImpl();
+        DataSource ds = dataSourceFactory.createDataSource(props);
+        Connection con = ds.getConnection();
+        Statement st = con.createStatement();
+        st.execute("DROP SCHEMA IF EXISTS MYSCHEMA CASCADE; CREATE SCHEMA MYSCHEMA; DROP TABLE IF EXISTS MYSCHEMA.GEOMTABLE; CREATE TABLE MYSCHEMA.GEOMTABLE (THE_GEOM GEOMETRY(GEOMETRY, 4326));");
+        st.execute("INSERT INTO MYSCHEMA.GEOMTABLE VALUES (ST_GeomFromText('POLYGON ((150 360, 200 360, 200 310, 150 310, 150 360))', 4326)),(ST_GeomFromText('POLYGON ((195.5 279, 240 279, 240 250, 195.5 250, 195.5 279))', 4326) )");
+        st.execute("ANALYZE MYSCHEMA.GEOMTABLE");
+        TableLocation tableLocation = TableLocation.parse("myschema.geomtable");
+        Geometry geom = GeometryTableUtilities.getEstimatedExtent(con, tableLocation, "the_geom");
+        assertNotNull(geom);
+        assertEquals(4326, geom.getSRID());
+        st.execute("DROP SCHEMA IF EXISTS MYSCHEMA CASCADE;");
+    }
+
+    @Disabled
+    @Test
+    public void testEnvelopeSchemaPostGIS() throws SQLException {
+        String url = "jdbc:postgresql://?/?";
+        Properties props = new Properties();
+        props.setProperty("user", "?");
+        props.setProperty("password", "?");
+        props.setProperty("url", url);
+        DataSourceFactory dataSourceFactory = new DataSourceFactoryImpl();
+        DataSource ds = dataSourceFactory.createDataSource(props);
+        Connection con = ds.getConnection();
+        Statement st = con.createStatement();
+        st.execute("DROP SCHEMA IF EXISTS MYSCHEMA CASCADE; CREATE SCHEMA MYSCHEMA; DROP TABLE IF EXISTS MYSCHEMA.GEOMTABLE; CREATE TABLE MYSCHEMA.GEOMTABLE (THE_GEOM GEOMETRY(GEOMETRY, 4326));");
+        st.execute("INSERT INTO MYSCHEMA.GEOMTABLE VALUES (ST_GeomFromText('POLYGON ((150 360, 200 360, 200 310, 150 310, 150 360))', 4326)),(ST_GeomFromText('POLYGON ((195.5 279, 240 279, 240 250, 195.5 250, 195.5 279))', 4326) )");
+        TableLocation tableLocation = TableLocation.parse("myschema.geomtable");
+        Geometry geom = GeometryTableUtilities.getEnvelope(con, tableLocation, "the_geom");
+        assertNotNull(geom);
+        assertTrue(geom.getArea()>0);
+        assertEquals(4326,geom.getSRID());
+        st.execute("DROP SCHEMA IF EXISTS MYSCHEMA CASCADE;");
     }
 
     @Test
