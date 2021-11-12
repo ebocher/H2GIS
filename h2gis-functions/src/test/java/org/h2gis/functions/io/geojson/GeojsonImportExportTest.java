@@ -44,6 +44,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.sql.DataSource;
+import org.h2.jdbc.JdbcSQLNonTransientException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -632,20 +633,20 @@ public class GeojsonImportExportTest {
             ResultSetMetaData metadata = res.getMetaData();
             assertEquals(15, metadata.getColumnCount());
             assertEquals("GEOMETRY", metadata.getColumnTypeName(1));
-            assertEquals("DOUBLE", metadata.getColumnTypeName(2));
-            assertEquals("DOUBLE", metadata.getColumnTypeName(3));
+            assertEquals("DOUBLE PRECISION", metadata.getColumnTypeName(2));
+            assertEquals("DOUBLE PRECISION", metadata.getColumnTypeName(3));
             assertEquals("BIGINT", metadata.getColumnTypeName(4));
             assertEquals("BIGINT", metadata.getColumnTypeName(5));
             assertEquals("BIGINT", metadata.getColumnTypeName(6));
-            assertEquals("VARCHAR", metadata.getColumnTypeName(7));
-            assertEquals("DOUBLE", metadata.getColumnTypeName(8));
-            assertEquals("DOUBLE", metadata.getColumnTypeName(9));
-            assertEquals("VARCHAR", metadata.getColumnTypeName(10));
+            assertEquals("CHARACTER VARYING", metadata.getColumnTypeName(7));
+            assertEquals("DOUBLE PRECISION", metadata.getColumnTypeName(8));
+            assertEquals("DOUBLE PRECISION", metadata.getColumnTypeName(9));
+            assertEquals("CHARACTER VARYING", metadata.getColumnTypeName(10));
             assertEquals("BOOLEAN", metadata.getColumnTypeName(11));
-            assertEquals("VARCHAR", metadata.getColumnTypeName(12));
-            assertEquals("DOUBLE", metadata.getColumnTypeName(13));
-            assertEquals("DOUBLE", metadata.getColumnTypeName(14));
-            assertEquals("DOUBLE", metadata.getColumnTypeName(15));
+            assertEquals("CHARACTER VARYING", metadata.getColumnTypeName(12));
+            assertEquals("DOUBLE PRECISION", metadata.getColumnTypeName(13));
+            assertEquals("DOUBLE PRECISION", metadata.getColumnTypeName(14));
+            assertEquals("DOUBLE PRECISION", metadata.getColumnTypeName(15));
             res.next();
             assertNull(res.getObject(1));
             assertEquals(79.04200463708992, res.getDouble(2));
@@ -1238,35 +1239,35 @@ public class GeojsonImportExportTest {
             stat.execute("DROP TABLE IF EXISTS TABLE_POINTS_READ");
         }
     }
-    
+
     @Test
     public void testReadlGeojsonFeatures() throws Exception {
         try (Statement stat = connection.createStatement()) {
             stat.execute("CALL GeoJsonRead(" + StringUtils.quoteStringSQL(GeojsonImportExportTest.class.getResource("features.geojson").getPath()) + ", 'TABLE_FEATURES', true);");
-            ResultSet res = stat.executeQuery("SELECT count(*) FROM TABLE_FEATURES;");          
+            ResultSet res = stat.executeQuery("SELECT count(*) FROM TABLE_FEATURES;");
             res.next();
-            assertEquals(3, res.getInt(1));            
+            assertEquals(3, res.getInt(1));
         }
     }
-    
+
     @Test
     public void testReadlGeojsonFeature() throws Exception {
         try (Statement stat = connection.createStatement()) {
             stat.execute("CALL GeoJsonRead(" + StringUtils.quoteStringSQL(GeojsonImportExportTest.class.getResource("feature.geojson").getPath()) + ", 'TABLE_FEATURE', true);");
-            ResultSet res = stat.executeQuery("SELECT * FROM TABLE_FEATURE;");          
+            ResultSet res = stat.executeQuery("SELECT * FROM TABLE_FEATURE;");
             res.next();
-            assertGeometryEquals("POINT Z (-1.637021666666667 47.15928666666667 10.2)", res.getObject(1));   
+            assertGeometryEquals("POINT Z (-1.637021666666667 47.15928666666667 10.2)", res.getObject(1));
             assertEquals(79.04200463708992, res.getDouble(2));
         }
     }
-    
+
     @Test
     public void testReadlGeojsonGeometry() throws Exception {
         try (Statement stat = connection.createStatement()) {
             stat.execute("CALL GeoJsonRead(" + StringUtils.quoteStringSQL(GeojsonImportExportTest.class.getResource("geometry.geojson").getPath()) + ", 'TABLE_GEOMETRY', true);");
-            ResultSet res = stat.executeQuery("SELECT * FROM TABLE_GEOMETRY;");          
+            ResultSet res = stat.executeQuery("SELECT * FROM TABLE_GEOMETRY;");
             res.next();
-            assertGeometryEquals("POINT Z (-1.637021666666667 47.15928666666667 10.2)", res.getObject(1));   
+            assertGeometryEquals("POINT Z (-1.637021666666667 47.15928666666667 10.2)", res.getObject(1));
         }
     }
 }

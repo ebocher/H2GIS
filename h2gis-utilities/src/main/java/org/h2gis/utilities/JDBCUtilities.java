@@ -136,7 +136,7 @@ public class JDBCUtilities {
      * Return true if table tableName contains field fieldName.
      *
      * @param connection Connection
-     * @param tableName a table name in the form CATALOG.SCHEMA.TABLE
+     * @param tableName Table name
      * @param fieldName Field name
      * @return True if the table contains the field
      * @throws SQLException
@@ -413,7 +413,7 @@ public class JDBCUtilities {
         boolean isLinked;
         try {
             if (rs.next()) {
-                String tableType = rs.getString("TABLE_TYPE");
+                String tableType = rs.getString("STORAGE_TYPE");
                 isLinked = tableType.contains("TABLE LINK");
             } else {
                 throw new SQLException("The table " + tableReference + " does not exists");
@@ -1033,11 +1033,8 @@ public class JDBCUtilities {
         DatabaseMetaData md = connection.getMetaData();
         ResultSet indexInfo = md.getIndexInfo(connection.getCatalog(), table.getSchema(), table.getTable(), false, true);
         while (indexInfo.next()) {
-            short type = indexInfo.getShort("TYPE");
-            if (type != DatabaseMetaData.tableIndexStatistic) {
-                if (columnName.equals(indexInfo.getString("COLUMN_NAME"))) {
-                    return true;
-                }
+            if (columnName.equals(indexInfo.getString("COLUMN_NAME"))) {
+                return true;
             }
         }
         return false;
@@ -1073,20 +1070,24 @@ public class JDBCUtilities {
         }
         DBTypes dbType = table.getDbTypes();
         if (dbType == H2 || dbType == H2GIS) {
-            PreparedStatement ps = connection.prepareStatement("SELECT INDEX_TYPE_NAME FROM INFORMATION_SCHEMA.INDEXES "
-                    + "WHERE INFORMATION_SCHEMA.INDEXES.TABLE_NAME=? "
-                    + "AND INFORMATION_SCHEMA.INDEXES.TABLE_SCHEMA=? "
-                    + "AND INFORMATION_SCHEMA.INDEXES.COLUMN_NAME=?;");
-            ps.setObject(1, table.getTable());
-            ps.setObject(2, table.getSchema("PUBLIC"));
+            PreparedStatement ps = connection.prepareStatement("SELECT INDEX_NAME FROM INFORMATION_SCHEMA.INDEX_COLUMNS "
+                    + "WHERE INFORMATION_SCHEMA.INDEX_COLUMNS.TABLE_NAME=? "
+                    + "AND INFORMATION_SCHEMA.INDEX_COLUMNS.TABLE_SCHEMA=? "
+                    + "AND INFORMATION_SCHEMA.INDEX_COLUMNS.COLUMN_NAME=?"
+                    + "AND INFORMATION_SCHEMA.INDEX_COLUMNS.INDEX_NAME "
+                    + "IN (SELECT INDEX_NAME FROM INFORMATION_SCHEMA.INDEXES  WHERE "
+                    + "INFORMATION_SCHEMA.INDEXES.TABLE_SCHEMA=? "
+                    + "AND  INFORMATION_SCHEMA.INDEXES.TABLE_NAME= ?  "
+                    + " AND INFORMATION_SCHEMA.INDEXES.INDEX_TYPE_NAME='SPATIAL INDEX')");
+            String tableName = table.getTable();
+            String schemaName = table.getSchema("PUBLIC");
+            ps.setObject(1, tableName);
+            ps.setObject(2, schemaName);
             ps.setObject(3, TableLocation.capsIdentifier(columnName, dbType));
+            ps.setObject(4, schemaName);
+            ps.setObject(5, tableName);
             ResultSet rs = ps.executeQuery();
-            while (rs.next()) {
-                if (rs.getString("INDEX_TYPE_NAME").contains("SPATIAL")) {
-                    return true;
-                }
-            }
-            return false;
+            return rs.next();
         } else if (dbType == POSTGIS || dbType == POSTGRESQL) {
             String query = "SELECT  cls.relname, am.amname "
                     + "FROM  pg_class cls "
@@ -1229,11 +1230,11 @@ public class JDBCUtilities {
         ResultSet indexInfo = md.getIndexInfo(connection.getCatalog(), table.getSchema(), table.getTable(), false, true);
         while (indexInfo.next()) {
             short type = indexInfo.getShort("TYPE");
-            if (type != DatabaseMetaData.tableIndexStatistic) {
+            //if (type != DatabaseMetaData.tableIndexStatistic) {
                 String indexName = indexInfo.getString("INDEX_NAME");
                 String columnName = indexInfo.getString("COLUMN_NAME");
                 indexes.put(indexName, columnName);
-            }
+           // }
         }
         return indexes;
     }
@@ -1270,11 +1271,8 @@ public class JDBCUtilities {
         ArrayList<String> indexes = new ArrayList<>();
         ResultSet indexInfo = md.getIndexInfo(connection.getCatalog(), table.getSchema(), table.getTable(), false, true);
         while (indexInfo.next()) {
-            short type = indexInfo.getShort("TYPE");
-            if (type != DatabaseMetaData.tableIndexStatistic) {
-                if (columnName.equals(indexInfo.getString("COLUMN_NAME"))) {
-                    indexes.add(indexInfo.getString("INDEX_NAME"));
-                }
+            if (columnName.equals(indexInfo.getString("COLUMN_NAME"))) {
+                indexes.add(indexInfo.getString("INDEX_NAME"));
             }
         }
         return indexes;
@@ -1293,8 +1291,9 @@ public class JDBCUtilities {
         dropIndex(connection, TableLocation.parse(table, getDBType(connection)), columnName);
     }
 
+
     /**
-     * Drop the all the indexes of the given table on the given connection.
+     * Drop the all the indexes of the given table on yhe given connection.
      *
      * @param connection Connection to access to the desired table.
      * @param table Table containing the column to drop index.
@@ -1320,5 +1319,5 @@ public class JDBCUtilities {
      */
     public static void dropIndex(Connection connection, String table) throws SQLException {
         dropIndex(connection, TableLocation.parse(table, getDBType(connection)));
-    }    
+    }
 }

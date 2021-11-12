@@ -207,7 +207,62 @@ public class TableLocation {
      * @return Java beans for table location
      */
     public static TableLocation parse(String concatenatedTableLocation) {
-        return parse(concatenatedTableLocation, null);
+        return parse(concatenatedTableLocation, DBTypes.H2);
+    }
+
+
+    /**
+     * Convert catalog.schema.table, schema.table or table into a String array
+     * instance. Non-specified schema or catalogs are converted to the empty string.
+     *
+     * @param tableName in the form [[Catalog.]Schema.]Table
+     * @return a String array with
+     * [0] = Catalog
+     * [1] = Schema
+     * [2] = Table
+     */
+    public static String[] split(String tableName) {
+        List<String> parts = new LinkedList<String>();
+        String catalog = "",schema = "",table = "";
+        StringTokenizer st = new StringTokenizer(tableName, ".`\"", true);
+        boolean openQuote = false;
+        StringBuilder sb = new StringBuilder();
+        while(st.hasMoreTokens()) {
+            String token = st.nextToken();
+            if(token.equals("`") || token.equals("\"")) {
+                sb.append("\"");
+                openQuote = !openQuote;
+            } else if(token.equals(".")) {
+                if(openQuote) {
+                    // Still in part
+                    sb.append(token);
+                } else {
+                    // end of part
+                    parts.add(sb.toString());
+                    sb = new StringBuilder();
+                }
+            } else {
+                sb.append(token);
+            }
+        }
+        if(sb.length() != 0) {
+            parts.add(sb.toString());
+        }
+        String[] values = parts.toArray(new String[0]);
+        switch (values.length) {
+            case 1:
+                table = values[0].trim();
+                break;
+            case 2:
+                schema = values[0].trim();
+                table = values[1].trim();
+                break;
+            case 3:
+                catalog = values[0].trim();
+                schema = values[1].trim();
+                table = values[2].trim();
+        }
+        return new String[]{catalog,schema,table};
     }
 
 

@@ -234,6 +234,46 @@ public class IOMethods {
      *
      * @param targetConnection The targetConnection to the database that will
      * received the table
+     * @param properties External database database properties to set up
+     * a connection to the target database
+     * @param sourceTable The name of the table in the external database
+     * @param targetTable The name of the table in the H2GIS database
+     * @param delete True to delete the table if exists
+     * @throws java.sql.SQLException
+     * @return  the name of the linked table
+     */
+    public static String linkedTable(Connection targetConnection, Properties properties, String sourceTable, String targetTable,
+                                     boolean delete) throws SQLException {
+        Map<String, String> map = new HashMap<>();
+        properties.forEach((key, value) -> map.put(key.toString(), value.toString()));
+        return linkedTable(targetConnection,map, sourceTable, targetTable,delete);
+    }
+
+    /**
+     * Link a table from another database to an H2GIS database
+     *
+     * @param targetConnection The targetConnection to the database that will
+     * received the table
+     * @param properties External database database properties to set up
+     * a connection to the target database
+     * @param sourceTable The name of the table in the external database
+     * @param targetTable The name of the table in the H2GIS database
+     * @param delete True to delete the table if exists
+     * @param fetchSize The number of rows fetched from the linked table
+     * @throws java.sql.SQLException
+     * @return  the name of the linked table
+     */
+    public static String linkedTable(Connection targetConnection, Properties properties, String sourceTable, String targetTable,
+                                     boolean delete, int fetchSize) throws SQLException {
+        Map<String, String> map = new HashMap<>();
+        properties.forEach((key, value) -> map.put(key.toString(), value.toString()));
+        return linkedTable(targetConnection,map, sourceTable, targetTable,delete,  fetchSize);
+    }
+    /**
+     * Link a table from another database to an H2GIS database
+     *
+     * @param targetConnection The targetConnection to the database that will
+     * received the table
      * @param databaseProperties External database databaseProperties to set up
      * a connection to the target database
      * @param sourceTable The name of the table in the external database
@@ -243,7 +283,26 @@ public class IOMethods {
      * @return  the name of the linked table
      */
     public static String linkedTable(Connection targetConnection, Map<String, String> databaseProperties, String sourceTable, String targetTable,
-            boolean delete) throws SQLException {
+                                     boolean delete) throws SQLException {
+        return linkedTable(targetConnection,databaseProperties, sourceTable, targetTable,delete, 100);
+    }
+
+        /**
+         * Link a table from another database to an H2GIS database
+         *
+         * @param targetConnection The targetConnection to the database that will
+         * received the table
+         * @param databaseProperties External database databaseProperties to set up
+         * a connection to the target database
+         * @param sourceTable The name of the table in the external database
+         * @param targetTable The name of the table in the H2GIS database
+         * @param delete True to delete the table if exists
+         * @param fetchSize The number of rows fetched from the linked table
+         * @throws java.sql.SQLException
+         * @return  the name of the linked table
+         */
+    public static String linkedTable(Connection targetConnection, Map<String, String> databaseProperties, String sourceTable, String targetTable,
+            boolean delete, int fetchSize) throws SQLException {
         if (targetConnection == null) {
             throw new SQLException("The connection to the output database cannot be null.\n");
         }
@@ -297,8 +356,8 @@ public class IOMethods {
                     }
 
                     try (Statement statement = targetConnection.createStatement()) {
-                        statement.execute(String.format("CREATE LINKED TABLE %s('%s', '%s', '%s', '%s', '%s')",
-                                ouputTableName, driverName, jdbc_url, user, password, sourceTable));
+                        statement.execute(String.format("CREATE LINKED TABLE %s('%s', '%s', '%s', '%s', '%s') FETCH_SIZE %s",
+                                ouputTableName, driverName, jdbc_url, user, password, sourceTable, fetchSize));
                         if (!targetConnection.getAutoCommit()) {
                             targetConnection.commit();
                         }
@@ -517,7 +576,7 @@ public class IOMethods {
                 }
                 insertTable.append(")");
                 //Check the first row in order to limit the batch size if the query doesn't work
-                if(inputRes.next()){                 
+                if(inputRes.next()){
                 preparedStatement = targetConnection.prepareStatement(insertTable.toString());
                 for (int i = 0; i < columnsCount; i++) {
                     int index = i + 1;
@@ -527,7 +586,7 @@ public class IOMethods {
                     }
                     preparedStatement.setObject(index, value);
                 }
-                
+
                 preparedStatement.execute();
                 long batchSize = 0;
                 while (inputRes.next()) {
