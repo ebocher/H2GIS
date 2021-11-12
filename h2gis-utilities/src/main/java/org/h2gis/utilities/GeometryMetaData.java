@@ -348,7 +348,7 @@ public class GeometryMetaData {
             geomMet.initGeometryType();
 
             return geomMet;
-        }catch (IOException | ParseException ex) {
+        }catch (IOException ex) {
             throw new RuntimeException("Cannot read the geometry metadata");
         }
     }

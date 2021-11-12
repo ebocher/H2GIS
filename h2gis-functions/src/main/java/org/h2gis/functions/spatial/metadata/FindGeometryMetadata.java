@@ -80,7 +80,7 @@ public class FindGeometryMetadata extends DeterministicScalarFunction{
         values[1] = ValueInteger.get(geomMeta.getDimension());
         values[2] = ValueInteger.get(srid);
         values[3] = ValueVarchar.get(geomMeta.getSfs_geometryType());
-        return ValueArray.get(values);
+        return ValueArray.get(values, null);
     }
 
 }
