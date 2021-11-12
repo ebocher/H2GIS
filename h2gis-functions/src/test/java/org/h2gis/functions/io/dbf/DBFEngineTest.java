@@ -65,7 +65,7 @@ public class  DBFEngineTest {
             ResultSet rs = st.executeQuery("SELECT * FROM INFORMATION_SCHEMA.COLUMNS where TABLE_NAME = 'DBFTABLE'")) {
             assertTrue(rs.next());
             assertEquals(H2TableIndex.PK_COLUMN_NAME,rs.getString("COLUMN_NAME"));
-            assertEquals("BIGINT",rs.getString("TYPE_NAME"));
+            assertEquals("BIGINT",rs.getString("DATA_TYPE"));
             assertTrue(rs.next());
             assertEquals("TYPE_AXE",rs.getString("COLUMN_NAME"));
             assertEquals("CHAR",rs.getString("TYPE_NAME"));

@@ -260,10 +260,9 @@ public class H2TableIndex extends Index {
         @Override
         public Value[] getValueList() {
             try {
-                int columnCount = getColumnCount();
-                Value[] values = new Value[columnCount];
+                Value[] values = new Value[getColumnCount()];
                 values[0] = ValueBigint.get(key);
-                for(int i = 1; i < columnCount; i++) {
+                for(int i = 1; i < values.length; i++) {
                     values[i] = (Value)(driver.getField(key - 1, i - 1));
                 }
                 return values;
@@ -313,8 +312,7 @@ public class H2TableIndex extends Index {
         @Override
         public void copyFrom(SearchRow source) {
             setKey(source.getKey());
-            int columnCount = getColumnCount();
-            for (int i = 0; i < columnCount; i++) {
+            for (int i = 0; i < getColumnCount(); i++) {
                 setValue(i, source.getValue(i));
             }
         }
@@ -322,8 +320,7 @@ public class H2TableIndex extends Index {
         @Override
         public String toString() {
             StringBuilder builder = new StringBuilder("( /* key:").append(key).append(" */ ");
-            int columnCount =getColumnCount();
-            for (int i = 0, length = columnCount; i < length; i++) {
+            for (int i = 0, length = getColumnCount(); i < length; i++) {
                 if (i > 0) {
                     builder.append(", ");
                 }

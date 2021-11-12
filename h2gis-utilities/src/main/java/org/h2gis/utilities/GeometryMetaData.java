@@ -325,7 +325,7 @@ public class GeometryMetaData {
      * @return Geometry MetaData
      * @throws IOException If WKB meta is invalid (do not check the Geometry)
      */
-    public static GeometryMetaData getMetaData(byte[] bytes)  {
+    public static GeometryMetaData getMetaData(byte[] bytes) {
         try {
             ByteOrderDataInStream dis = new ByteOrderDataInStream();
             dis.setInStream(new ByteArrayInStream(bytes));
@@ -348,7 +348,7 @@ public class GeometryMetaData {
             geomMet.initGeometryType();
 
             return geomMet;
-        }catch (IOException ex) {
+        }catch (IOException |ParseException ex) {
             throw new RuntimeException("Cannot read the geometry metadata");
         }
     }
