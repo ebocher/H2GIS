@@ -26,6 +26,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -38,8 +39,34 @@ import java.util.List;
  * @author Erwan BOCHER, CNRS
  */
 public class ResultSetWrapper {
-    private final List<ColumnWrapper> columns = new ArrayList<>();
+    private final List<ColumnWrapper> columns ;
     private int rowCount = 0;
+
+    /** Size of metadata header in bytes */
+    private static final int METADATA_HEADER_SIZE = 8; // colCount(4) + rowCount(4)
+
+    /** Size of each column offset pointer in bytes */
+    private static final int OFFSET_POINTER_SIZE = 8;
+
+    /** Default initial capacity for columns list */
+    private static final int DEFAULT_COLUMN_CAPACITY = 20;
+    /**
+     * Default constructor with optimized initial capacity.
+     */
+    public ResultSetWrapper() {
+        this.columns = new ArrayList<>(DEFAULT_COLUMN_CAPACITY);
+        this.rowCount = 0;
+    }
+
+    /**
+     * Constructor with specified column capacity.
+     *
+     * @param columnCapacity initial capacity for columns list
+     */
+    public ResultSetWrapper(int columnCapacity) {
+        this.columns = new ArrayList<>(Math.max(1, columnCapacity));
+        this.rowCount = 0;
+    }
 
     /**
      * Returns the list of wrapped columns in the result set.
@@ -119,20 +146,28 @@ public class ResultSetWrapper {
      */
     public static ResultSetWrapper from(ResultSet rs) {
         try {
-            ResultSetWrapper wrapper = new ResultSetWrapper();
-            ResultSetMetaData rsm = rs.getMetaData();
-            int colCount = rsm.getColumnCount();
+            final ResultSetMetaData rsm = rs.getMetaData();
+            final int colCount = rsm.getColumnCount();
+            // Create wrapper with exact column capacity
+            final ResultSetWrapper wrapper = new ResultSetWrapper(colCount);
 
             createColumns(wrapper, rsm, colCount);
+
+            // Pre-check for geometry columns to avoid repeated string comparisons
+            final boolean[] isGeometryColumn = new boolean[colCount];
+            for (int i = 0; i < colCount; i++) {
+                isGeometryColumn[i] = wrapper.columns.get(i).getTypeName().startsWith(ColumnWrapper.GEOMETRY_PREFIX);
+            }
 
             int rowCounter = 0;
             while (rs.next()) {
                 for (int i = 1; i <= colCount; i++) {
-                    if (wrapper.columns.get(i - 1).getTypeName().startsWith("geometry")) {
-                        Object obj = rs.getObject(i);
-                        wrapper.columns.get(i - 1).addValue(ValueGeometry.getFromGeometry(obj).getBytes());
+                    final int jdbcIndex = i + 1; // JDBC is 1-based
+                    final ColumnWrapper column = wrapper.columns.get(i);
+                    if (isGeometryColumn[i]) {
+                        addGeometryValue(rs, column, jdbcIndex);
                     } else {
-                        wrapper.columns.get(i - 1).addValue(rs.getObject(i));
+                        column.addValue(rs.getObject(jdbcIndex));
                     }
                 }
                 rowCounter++;
@@ -141,9 +176,8 @@ public class ResultSetWrapper {
             return wrapper;
 
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("Error creating ResultSetWrapper: " + e.getMessage());
             return null;
-
         }
     }
 
@@ -153,7 +187,7 @@ public class ResultSetWrapper {
      * @param rsm      the ResultsetMetadata that will be used to know the columns to add
      * @param colCount the number of columns to add.
      **/
-    public static void createColumns(ResultSetWrapper wrapper, ResultSetMetaData rsm, int colCount) throws Exception {
+    public static void createColumns(ResultSetWrapper wrapper, ResultSetMetaData rsm, int colCount) throws SQLException {
         for (int i = 1; i <= colCount; i++) {
             ColumnWrapper column = new ColumnWrapper(rsm.getColumnLabel(i), rsm.getColumnType(i), rsm.getColumnTypeName(i).toLowerCase());
             wrapper.addColumn(column);
@@ -168,36 +202,43 @@ public class ResultSetWrapper {
      * @return a new {@code ResultSetWrapper} containing the extracted data
      */
     public static ResultSetWrapper fromOne(ResultSet rs) {
+        if (rs == null) {
+            return null;
+        }
         try {
-            ResultSetWrapper wrapper = new ResultSetWrapper();
-            ResultSetMetaData rsm = rs.getMetaData();
-            int colCount = rsm.getColumnCount();
+            final ResultSetMetaData rsm = rs.getMetaData();
+            final int colCount = rsm.getColumnCount();
 
+            final ResultSetWrapper wrapper = new ResultSetWrapper(colCount);
             createColumns(wrapper, rsm, colCount);
 
-            int rowCounter = 0;
+            // Pre-check for geometry columns
+            final boolean[] isGeometryColumn = new boolean[colCount];
+            for (int i = 0; i < colCount; i++) {
+                isGeometryColumn[i] = wrapper.columns.get(i).getTypeName().startsWith(ColumnWrapper.GEOMETRY_PREFIX);
+            }
+
+            // Read only first row
             if (rs.next()) {
-                for (int i = 1; i <= colCount; i++) {
-                    if (wrapper.columns.get(i - 1).getTypeName().startsWith("geometry")) {
-                        Object obj = rs.getObject(i);
-                        if (obj == null) {
-                            wrapper.columns.get(i - 1).addValue(null);
-                        } else {
-                            wrapper.columns.get(i - 1).addValue(ValueGeometry.getFromGeometry(obj).getBytes());
-                        }
+                for (int i = 0; i < colCount; i++) {
+                    final int jdbcIndex = i + 1;
+                    final ColumnWrapper column = wrapper.columns.get(i);
+
+                    if (isGeometryColumn[i]) {
+                        addGeometryValue(rs, column, jdbcIndex);
                     } else {
-                        wrapper.columns.get(i - 1).addValue(rs.getObject(i));
+                        column.addValue(rs.getObject(jdbcIndex));
                     }
                 }
-                rowCounter++;
+                wrapper.setRowCount(1);
+            } else {
+                wrapper.setRowCount(0);
             }
-            wrapper.setRowCount(rowCounter);
             return wrapper;
 
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (SQLException e) {
+            System.err.println("Error creating ResultSetWrapper (one row): " + e.getMessage());
             return null;
-
         }
     }
 
@@ -210,22 +251,33 @@ public class ResultSetWrapper {
      * @return a new {@code ResultSetWrapper} containing the extracted data
      */
     public static ResultSetWrapper fromBatch(ResultSet rs, int batchSize) {
+        if (rs == null || batchSize <= 0) {
+            return null;
+        }
         try {
-            ResultSetWrapper wrapper = new ResultSetWrapper();
-            ResultSetMetaData rsm = rs.getMetaData();
-            int colCount = rsm.getColumnCount();
-
+            final ResultSetMetaData rsm = rs.getMetaData();
+            final int colCount = rsm.getColumnCount();
+            final ResultSetWrapper wrapper = new ResultSetWrapper(colCount);
             createColumns(wrapper, rsm, colCount);
 
+            // Pre-check for geometry columns
+            final boolean[] isGeometryColumn = new boolean[colCount];
+            for (int i = 0; i < colCount; i++) {
+                isGeometryColumn[i] = wrapper.columns.get(i).getTypeName().startsWith(ColumnWrapper.GEOMETRY_PREFIX);
+            }
+
+
+            // Read batch of rows
             int rowCounter = 0;
-            // Fetch rows up to batchSize
             while (rowCounter < batchSize && rs.next()) {
-                for (int i = 1; i <= colCount; i++) {
-                    if (wrapper.columns.get(i - 1).getTypeName().startsWith("geometry")) {
-                        Object obj = rs.getObject(i);
-                        wrapper.columns.get(i - 1).addValue(ValueGeometry.getFromGeometry(obj).getBytes());
+                for (int i = 0; i < colCount; i++) {
+                    final int jdbcIndex = i + 1;
+                    final ColumnWrapper column = wrapper.columns.get(i);
+
+                    if (isGeometryColumn[i]) {
+                        addGeometryValue(rs, column, jdbcIndex);
                     } else {
-                        wrapper.columns.get(i - 1).addValue(rs.getObject(i));
+                        column.addValue(rs.getObject(jdbcIndex));
                     }
                 }
                 rowCounter++;
@@ -233,8 +285,8 @@ public class ResultSetWrapper {
             wrapper.setRowCount(rowCounter);
             return wrapper;
 
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (SQLException e) {
+            System.err.println("Error creating ResultSetWrapper (batch): " + e.getMessage());
             return null;
 
         }
@@ -254,29 +306,77 @@ public class ResultSetWrapper {
      * @throws Exception if serialization fails
      */
     public byte[] serialize() throws Exception {
-        int metadataSize = 4 + 4 + (8 * columns.size()); // reserved + colCount + rowCount + pointers
+        final int colCount = columns.size();
+        final int metadataSize = METADATA_HEADER_SIZE + (OFFSET_POINTER_SIZE * colCount);
 
-        List<byte[]> columnBuffers = new ArrayList<>();
+        // Pre-serialize all columns to calculate total size
+        final List<byte[]> columnBuffers = new ArrayList<>(colCount);
+        int totalDataSize = 0;
+
         for (ColumnWrapper col : columns) {
-            columnBuffers.add(col.serialize());
+            final byte[] colData = col.serialize();
+            columnBuffers.add(colData);
+            totalDataSize += colData.length;
         }
 
-        ByteBuffer meta = ByteBuffer.allocate(metadataSize).order(ByteOrder.LITTLE_ENDIAN);
-        meta.putInt(columns.size());
-        meta.putInt(rowCount);
+        // Allocate exact buffer size needed
+        final int totalSize = metadataSize + totalDataSize;
+        final ByteBuffer buffer = ByteBuffer.allocate(totalSize)
+                .order(ByteOrder.LITTLE_ENDIAN);
 
+        // Write metadata header
+        buffer.putInt(colCount);
+        buffer.putInt(rowCount);
+
+        // Write column offsets
         int currentOffset = metadataSize;
-        for (byte[] buf : columnBuffers) {
-            meta.putLong(currentOffset);
-            currentOffset += buf.length;
-        }
-
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        out.write(meta.array());
         for (byte[] colBuf : columnBuffers) {
-            out.write(colBuf);
+            buffer.putLong(currentOffset);
+            currentOffset += colBuf.length;
         }
 
-        return out.toByteArray();
+        // Write column data
+        for (byte[] colBuf : columnBuffers) {
+            buffer.put(colBuf);
+        }
+        return buffer.array();
+    }
+
+    /**
+     * Adds a geometry value to a column, handling null values properly.
+     * Extracted method to reduce code duplication.
+     *
+     * @param rs the ResultSet to read from
+     * @param column the column to add the value to
+     * @param jdbcIndex the JDBC column index (1-based)
+     * @throws SQLException if value retrieval fails
+     */
+    private static void addGeometryValue(ResultSet rs, ColumnWrapper column, int jdbcIndex)
+            throws SQLException {
+        final Object obj = rs.getObject(jdbcIndex);
+        if (obj == null) {
+            column.addValue(null);
+        } else {
+            try {
+                column.addValue(ValueGeometry.getFromGeometry(obj).getBytes());
+            } catch (Exception e) {
+                // If geometry conversion fails, store null
+                System.err.println("Failed to convert geometry: " + e.getMessage());
+                column.addValue(null);
+            }
+        }
+    }
+
+    /**
+     * Returns a string representation of this wrapper for debugging.
+     *
+     * @return debug string
+     */
+    @Override
+    public String toString() {
+        return "ResultSetWrapper{" +
+                "columnCount=" + getColumnCount() +
+                ", rowCount=" + rowCount +
+                '}';
     }
 }

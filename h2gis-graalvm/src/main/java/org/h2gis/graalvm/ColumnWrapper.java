@@ -37,6 +37,44 @@ import java.util.List;
  * @author Erwan BOCHER, CNRS
  */
 public class ColumnWrapper {
+
+    // ============================================================================
+    // CONSTANTS - Type Codes
+    // ============================================================================
+
+    /** Type code for INTEGER, SMALLINT, TINYINT */
+    public static final int TYPE_INT = 1;
+
+    /** Type code for BIGINT */
+    public static final int TYPE_LONG = 2;
+
+    /** Type code for FLOAT, REAL */
+    public static final int TYPE_FLOAT = 3;
+
+    /** Type code for DOUBLE, NUMERIC, DECIMAL */
+    public static final int TYPE_DOUBLE = 4;
+
+    /** Type code for BOOLEAN, BIT */
+    public static final int TYPE_BOOLEAN = 5;
+
+    /** Type code for CHAR, VARCHAR, LONGVARCHAR */
+    public static final int TYPE_STRING = 6;
+
+    /** Type code for DATE, TIME, TIMESTAMP */
+    public static final int TYPE_DATE = 7;
+
+    /** Type code for GEOMETRY (WKB format) */
+    public static final int TYPE_GEOMETRY = 8;
+
+    /** Type code for OTHER types (serialized as string) */
+    public static final int TYPE_OTHER = 99;
+
+    /** Default initial capacity for values list */
+    private static final int DEFAULT_CAPACITY = 1000;
+
+    /** Geometry type prefix for identification */
+    static final String GEOMETRY_PREFIX = "geometry";
+
     private final String name;
     private final int typeCode;
 
@@ -44,62 +82,29 @@ public class ColumnWrapper {
 
     private final List<Object> values;
 
+    /** Cached name bytes for serialization */
+    private final byte[] nameBytes;
+
+    /** Empty byte array constant for reuse */
+    private static final byte[] EMPTY_BYTES = new byte[0];
+
+    /** Buffer sizes for serialization */
+    private static final int BUFFER_4_BYTES = 4;
+    private static final int BUFFER_8_BYTES = 8;
+
     /**
      * Constructs a {@code ColumnWrapper} with the given name and SQL type.
      *
      * @param name     the name of the column
-     * @param typeCode the SQL type (as defined in {@link java.sql.Types})
+     * @param sqlType the SQL type (as defined in {@link java.sql.Types})
      * @param typeName the name of the SQL type
      */
-    public ColumnWrapper(String name, int typeCode, String typeName) {
+    public ColumnWrapper(String name, int sqlType, String typeName) {
         this.name = name;
+        this.nameBytes = name.getBytes(StandardCharsets.UTF_8);
         this.typeName = typeName.toLowerCase();
-        this.values = new ArrayList<>();
-
-        switch (typeCode) {
-            case Types.INTEGER:
-            case Types.SMALLINT:
-            case Types.TINYINT:
-                this.typeCode = 1; // INT
-                break;
-            case Types.BIGINT:
-                this.typeCode = 2; // LONG
-                break;
-            case Types.FLOAT:
-            case Types.REAL:
-                this.typeCode = 3; // FLOAT (32-bit)
-                break;
-            case Types.DOUBLE:
-            case Types.NUMERIC:
-            case Types.DECIMAL:
-                this.typeCode = 4; // DOUBLE (64-bit)
-                break;
-            case Types.BOOLEAN:
-            case Types.BIT:
-                this.typeCode = 5; // BOOLEAN
-                break;
-            case Types.CHAR:
-            case Types.VARCHAR:
-            case Types.LONGVARCHAR:
-                this.typeCode = 6; // STRING
-                break;
-            case Types.DATE:
-            case Types.TIME:
-            case Types.TIMESTAMP:
-                this.typeCode = 7; // DATE as string
-                break;
-            case Types.OTHER:
-            case Types.STRUCT:
-            default:
-                if (typeName.startsWith("geometry")) {
-                    this.typeCode = 8; // GEOMETRY (WKB)
-                } else {
-                    this.typeCode = 99; // OTHER (as string)
-                }
-                break;
-        }
-
-
+        this.values = new ArrayList<>(DEFAULT_CAPACITY);
+        this.typeCode = mapSqlTypeToCode(sqlType, this.typeName);
     }
 
     /**
@@ -119,7 +124,16 @@ public class ColumnWrapper {
      * @param value the value to set
      */
     public void setValueAt(int index, Object value) {
-        while (index >= values.size()) values.add(null);
+        if (index < 0) {
+            throw new IllegalArgumentException("Index cannot be negative: " + index);
+        }
+        final int currentSize = values.size();
+        if (index >= currentSize) {
+            final int nullsToAdd = index - currentSize + 1;
+            for (int i = 0; i < nullsToAdd; i++) {
+                values.add(null);
+            }
+        }
         values.set(index, value);
     }
 
@@ -179,61 +193,273 @@ public class ColumnWrapper {
      * @throws Exception if serialization fails
      */
     public byte[] serialize() throws Exception {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        ByteBuffer bb4 = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
-        ByteBuffer bb8 = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN);
+        // Calculate total size first for single allocation
+        final int headerSize = BUFFER_4_BYTES + nameBytes.length + BUFFER_4_BYTES + BUFFER_4_BYTES;
+        final int valuesDataSize = calculateValuesDataSize();
+        final int totalSize = headerSize + valuesDataSize;
 
-        byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
-        out.write(bb4.putInt(nameBytes.length).array());
-        bb4.clear();
-        out.write(nameBytes);
-        out.write(bb4.putInt(this.typeCode).array());
-        bb4.clear();
+        // Allocate exact buffer size
+        final ByteBuffer buffer = ByteBuffer.allocate(totalSize)
+                .order(ByteOrder.LITTLE_ENDIAN);
 
-        ByteArrayOutputStream data = new ByteArrayOutputStream();
+        // Write header
+        buffer.putInt(nameBytes.length);
+        buffer.put(nameBytes);
+        buffer.putInt(typeCode);
+        buffer.putInt(valuesDataSize);
 
-        for (Object val : values) {
-            switch (this.typeCode) {
-                case 1:
-                    data.write(bb4.putInt(val == null ? 0 : ((Number) val).intValue()).array());
-                    bb4.clear();
-                    break;
-                case 2:
-                    data.write(bb8.putLong(val == null ? 0L : ((Number) val).longValue()).array());
-                    bb8.clear();
-                    break;
-                case 3:
-                    data.write(bb4.putFloat(val == null ? 0f : ((Number) val).floatValue()).array());
-                    bb4.clear();
-                    break;
-                case 4:
-                    data.write(bb8.putDouble(val == null ? 0.0 : ((Number) val).doubleValue()).array());
-                    bb8.clear();
-                    break;
-                case 5:
-                    data.write(val != null && ((Boolean) val) ? 1 : 0);
-                    break;
-                case 6:
-                case 7:
-                case 99:
-                    byte[] str = (val == null) ? new byte[0]
-                            : val.toString().getBytes(StandardCharsets.UTF_8);
-                    data.write(bb4.putInt(str.length).array());
-                    bb4.clear();
-                    data.write(str);
-                    break;
-                case 8:
-                    byte[] geom = (val == null) ? new byte[0] : (byte[]) val;
-                    data.write(bb4.putInt(geom.length).array());
-                    bb4.clear();
-                    data.write(geom);
-                    break;
-            }
+        // Write values data
+        serializeValues(buffer);
+
+        return buffer.array();
+    }
+
+    /**
+     * Calculates the total size needed for values data.
+     * Optimized to avoid double traversal.
+     *
+     * @return total size in bytes
+     */
+    private int calculateValuesDataSize() {
+        int size = 0;
+
+        switch (typeCode) {
+            case TYPE_INT:
+            case TYPE_FLOAT:
+                size = values.size() * BUFFER_4_BYTES;
+                break;
+
+            case TYPE_LONG:
+            case TYPE_DOUBLE:
+                size = values.size() * BUFFER_8_BYTES;
+                break;
+
+            case TYPE_BOOLEAN:
+                size = values.size(); // 1 byte per value
+                break;
+
+            case TYPE_STRING:
+            case TYPE_DATE:
+            case TYPE_OTHER:
+                for (Object val : values) {
+                    size += BUFFER_4_BYTES; // length prefix
+                    if (val != null) {
+                        size += val.toString().getBytes(StandardCharsets.UTF_8).length;
+                    }
+                }
+                break;
+
+            case TYPE_GEOMETRY:
+                for (Object val : values) {
+                    size += BUFFER_4_BYTES; // length prefix
+                    if (val != null) {
+                        size += ((byte[]) val).length;
+                    }
+                }
+                break;
         }
-        byte[] valuesBytes = data.toByteArray();
-        out.write(bb4.putInt(valuesBytes.length).array());
-        bb4.clear();
-        out.write(valuesBytes);
-        return out.toByteArray();
+
+        return size;
+    }
+
+    /**
+     * Serializes all values into the provided buffer.
+     * Optimized with direct buffer writing and minimal object creation.
+     *
+     * @param buffer the ByteBuffer to write to
+     */
+    private void serializeValues(ByteBuffer buffer) {
+        for (Object val : values) {
+            serializeValue(buffer, val);
+        }
+    }
+
+    /**
+     * Serializes a single value into the buffer.
+     * Optimized with switch statement and direct writes.
+     *
+     * @param buffer the ByteBuffer to write to
+     * @param val    the value to serialize
+     */
+    private void serializeValue(ByteBuffer buffer, Object val) {
+        switch (typeCode) {
+            case TYPE_INT:
+                buffer.putInt(val == null ? 0 : ((Number) val).intValue());
+                break;
+
+            case TYPE_LONG:
+                buffer.putLong(val == null ? 0L : ((Number) val).longValue());
+                break;
+
+            case TYPE_FLOAT:
+                buffer.putFloat(val == null ? 0f : ((Number) val).floatValue());
+                break;
+
+            case TYPE_DOUBLE:
+                buffer.putDouble(val == null ? 0.0 : ((Number) val).doubleValue());
+                break;
+
+            case TYPE_BOOLEAN:
+                buffer.put((byte) (val != null && ((Boolean) val) ? 1 : 0));
+                break;
+
+            case TYPE_STRING:
+            case TYPE_DATE:
+            case TYPE_OTHER:
+                serializeStringValue(buffer, val);
+                break;
+
+            case TYPE_GEOMETRY:
+                serializeGeometryValue(buffer, val);
+                break;
+        }
+    }
+
+    /**
+     * Serializes a string-like value.
+     * Optimized with empty bytes constant reuse.
+     *
+     * @param buffer the ByteBuffer to write to
+     * @param val    the value to serialize
+     */
+    private void serializeStringValue(ByteBuffer buffer, Object val) {
+        final byte[] bytes = (val == null)
+                ? EMPTY_BYTES
+                : val.toString().getBytes(StandardCharsets.UTF_8);
+        buffer.putInt(bytes.length);
+        buffer.put(bytes);
+    }
+
+    /**
+     * Serializes a geometry value (WKB format).
+     * Optimized with empty bytes constant reuse.
+     *
+     * @param buffer the ByteBuffer to write to
+     * @param val    the value to serialize (byte array)
+     */
+    private void serializeGeometryValue(ByteBuffer buffer, Object val) {
+        final byte[] bytes = (val == null) ? EMPTY_BYTES : (byte[]) val;
+        buffer.putInt(bytes.length);
+        buffer.put(bytes);
+    }
+
+    /**
+     * Maps SQL type to internal type code.
+     * Extracted for clarity and potential reuse.
+     *
+     * @param sqlType  the JDBC SQL type constant
+     * @param typeName the type name (lowercase)
+     * @return internal type code
+     */
+    private static int mapSqlTypeToCode(int sqlType, String typeName) {
+        switch (sqlType) {
+            case Types.INTEGER:
+            case Types.SMALLINT:
+            case Types.TINYINT:
+                return TYPE_INT;
+            case Types.BIGINT:
+                return TYPE_LONG;
+            case Types.FLOAT:
+            case Types.REAL:
+                return TYPE_FLOAT;
+            case Types.DOUBLE:
+            case Types.NUMERIC:
+            case Types.DECIMAL:
+                return TYPE_DOUBLE;
+            case Types.BOOLEAN:
+            case Types.BIT:
+                return TYPE_BOOLEAN;
+            case Types.CHAR:
+            case Types.VARCHAR:
+            case Types.LONGVARCHAR:
+                return TYPE_STRING;
+            case Types.DATE:
+            case Types.TIME:
+            case Types.TIMESTAMP:
+                return TYPE_DATE;
+            case Types.OTHER:
+            case Types.STRUCT:
+            default:
+                return typeName.startsWith(GEOMETRY_PREFIX) ? TYPE_GEOMETRY : TYPE_OTHER;
+        }
+    }
+
+    /**
+     * Returns a string representation of this column for debugging.
+     *
+     * @return debug string
+     */
+    @Override
+    public String toString() {
+        return "ColumnWrapper{" +
+                "name='" + name + '\'' +
+                ", typeCode=" + typeCode +
+                ", typeName='" + typeName + '\'' +
+                ", valueCount=" + values.size() +
+                '}';
+    }
+
+    /**
+     * Clears all values from this column.
+     * Useful for reusing the column wrapper.
+     */
+    public void clear() {
+        values.clear();
+    }
+
+    /**
+     * Estimates memory usage of this column in bytes.
+     * Useful for monitoring and optimization.
+     *
+     * @return estimated memory usage in bytes
+     */
+    public long estimateMemoryUsage() {
+        long size = 0;
+
+        // Object header and references
+        size += 48; // Approximate object overhead
+
+        // Name and nameBytes
+        size += name.length() * 2; // chars
+        size += nameBytes.length;
+
+        // TypeName
+        size += typeName.length() * 2;
+
+        // ArrayList overhead
+        size += 40;
+
+        // Values
+        switch (typeCode) {
+            case TYPE_INT:
+            case TYPE_FLOAT:
+                size += values.size() * 20; // Integer/Float wrapper + reference
+                break;
+            case TYPE_LONG:
+            case TYPE_DOUBLE:
+                size += values.size() * 24; // Long/Double wrapper + reference
+                break;
+            case TYPE_BOOLEAN:
+                size += values.size() * 16; // Boolean wrapper + reference
+                break;
+            case TYPE_STRING:
+            case TYPE_DATE:
+            case TYPE_OTHER:
+                for (Object val : values) {
+                    if (val != null) {
+                        size += 40 + val.toString().length() * 2;
+                    }
+                }
+                break;
+            case TYPE_GEOMETRY:
+                for (Object val : values) {
+                    if (val != null) {
+                        size += 40 + ((byte[]) val).length;
+                    }
+                }
+                break;
+        }
+
+        return size;
     }
 }
