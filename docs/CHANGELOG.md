@@ -1,4 +1,4 @@
-## Changelog for v2.2.5
+## Changelog for v2.2.6
 
 - Improve H2GIS-GRAALVM module
 - Add github action to compile H2GIS with GraalVM 25 +
@@ -9,3 +9,4 @@
 - Add ST_ClusterIntersecting function
 - Add ST_ClusterWithin function
 - Improve clustering functions to load only ids
+- Improve ST_CLIP to process complex polygon
