@@ -24,6 +24,7 @@ import org.h2gis.api.DeterministicScalarFunction;
 import org.h2gis.functions.spatial.convert.ST_Holes;
 import org.h2gis.functions.spatial.convert.ST_ToMultiLine;
 import org.h2gis.functions.spatial.edit.ST_CollectionExtract;
+import org.h2gis.functions.spatial.topology.ST_Node;
 import org.h2gis.functions.spatial.topology.ST_Polygonize;
 import org.locationtech.jts.geom.*;
 import org.locationtech.jts.geom.prep.PreparedGeometry;
@@ -76,31 +77,35 @@ public class ST_Clip extends DeterministicScalarFunction {
             throw new SQLException("Operation on mixed SRID geometries not supported");
         }
 
+        if (!geomToClip.getEnvelopeInternal().intersects(geomForClip.getEnvelopeInternal())) {
+            return geomToClip;
+        }
+
         if (geomToClip instanceof Polygon || geomToClip instanceof MultiPolygon) {
             Geometry geomForClipReduced = ST_ToMultiLine.execute(geomForClip);
             if (geomForClipReduced.isEmpty()) {
                 throw new SQLException("Only support [Multi]Polygon or [Multi]LineString as input geometry for clipping");
             }
-            if (geomToClip.intersects(geomForClipReduced)) {
-                GeometryFactory factory = geomToClip.getFactory();
-                Geometry geomNoded = factory.createGeometryCollection(new Geometry[]{ST_ToMultiLine.execute(geomToClip), geomForClipReduced}).union();
-                Geometry pols = ST_Polygonize.execute(geomNoded);
-                Geometry holes = OverlayNGRobust.overlay(ST_Holes.execute(geomToClip), ST_Holes.execute(geomForClip), OverlayNG.UNION);
-                List selected = new ArrayList();
-                int nb = pols.getNumGeometries();
-                PreparedGeometry pg_holes = new PreparedGeometryFactory().create(holes);
-                PreparedGeometry pg_geomToClip = new PreparedGeometryFactory().create(geomToClip);
-                for (int i = 0; i < nb; i++) {
-                    Geometry g = pols.getGeometryN(i);
-                    Point pt = g.getInteriorPoint();
-                    if (!pg_holes.intersects(pt) && pg_geomToClip.intersects(pt)) {
-                        selected.add(g);
-                    }
+
+            GeometryFactory factory = geomToClip.getFactory();
+            Geometry geomNoded = ST_Node.node(factory.createGeometryCollection(new Geometry[]{ST_ToMultiLine.execute(geomToClip), geomForClipReduced})).union();
+            Geometry pols = ST_Polygonize.execute(geomNoded);
+            Geometry holes = OverlayNGRobust.overlay(ST_Holes.execute(geomToClip), ST_Holes.execute(geomForClip), OverlayNG.UNION);
+            ArrayList<Geometry> selected = new ArrayList<>();
+            int nb = pols.getNumGeometries();
+            PreparedGeometry pg_holes = new PreparedGeometryFactory().create(holes);
+            PreparedGeometry pg_geomToClip = new PreparedGeometryFactory().create(geomToClip);
+            for (int i = 0; i < nb; i++) {
+                Geometry g = pols.getGeometryN(i);
+                Point pt = g.getInteriorPoint();
+                if (!pg_holes.intersects(pt) && pg_geomToClip.intersects(pt)) {
+                    selected.add(g);
                 }
-                Geometry geom = factory.buildGeometry(selected);
-                geom.setSRID(geomToClip.getSRID());
-                return geom;
             }
+            Geometry geom = factory.buildGeometry(selected);
+            geom.setSRID(geomToClip.getSRID());
+            return geom;
+
 
         } else if (geomToClip instanceof LineString || geomToClip instanceof MultiLineString) {
             Geometry geomForClipReduced = ST_ToMultiLine.execute(geomForClip);
