@@ -8,5 +8,6 @@
 - Add ST_ClusterDBScan function
 - Add ST_ClusterIntersecting function
 - Add ST_ClusterWithin function
-- Improve clustering functions to load only ids
+- Improve clustering functions to load only ids- 
+- Fix CPU compatibility issues in GraalVM about https://github.com/orbisgis/h2gis/issues/1473
 - Improve ST_CLIP to process complex polygon
