@@ -5,6 +5,7 @@ import org.h2.value.Value;
 import org.h2.value.ValueVarchar;
 import org.h2gis.functions.factory.H2GISDBFactory;
 import org.h2gis.functions.io.fgb.fileTable.FGBDriver;
+import org.h2gis.utilities.GeometryTableUtilities;
 import org.h2gis.utilities.JDBCUtilities;
 import org.h2gis.utilities.URIUtilities;
 import org.junit.jupiter.api.AfterAll;
@@ -545,6 +546,19 @@ public class FGBImportExportTest {
             assertEquals(10.25, rs.getFloat("area"), 10-2);
             assertFalse(rs.getBoolean("boolean_col"));
             assertFalse(rs.next());
+        }
+    }
+
+    @Test
+    public void testSaveSelectSrid(@TempDir File temporaryDirectory) throws Exception {
+        File file = new File(temporaryDirectory, "select_srid.fgb");
+        file.deleteOnExit();
+        try (Statement stat = connection.createStatement()) {
+            stat.execute("CALL FGBWrite('"+file+"', '(SELECT ST_GEOMFROMTEXT(''POINT(0 0)'', 4326) As the_geom, 1 as id)', true);");
+            stat.execute("DROP TABLE IF EXISTS TABLE_POINTS");
+            stat.execute("CALL FGBRead('"+file+"', 'TABLE_POINTS', true);");
+            assertEquals(1, JDBCUtilities.getRowCount(connection,"TABLE_POINTS"));
+            assertEquals(4326, GeometryTableUtilities.getSRID(connection,"TABLE_POINTS"));
         }
     }
 }

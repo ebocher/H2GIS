@@ -132,7 +132,7 @@ public class FGBWriteDriver {
                     }
                     rs.beforeFirst();
                     ProgressVisitor copyProgress = progress.subProcess(recordCount);
-                    doExport(progress, rs,  spatialFieldNameAndIndex.first(), recordCount, new FileOutputStream(fileName), null);
+                    doExport(progress, rs,  spatialFieldNameAndIndex.first(), recordCount, new FileOutputStream(fileName), null, srid);
                     copyProgress.endOfProgress();
                     return fileName.getAbsolutePath();
                 } else {
@@ -180,7 +180,7 @@ public class FGBWriteDriver {
                     Tuple<String, GeometryMetaData> geomMetadata = GeometryTableUtilities.getFirstColumnMetaData(connection, parse);
                     String geomCol = geomMetadata.first();
                     ResultSet rs = st.executeQuery(String.format("select * from %s", outputTable));
-                    doExport(progress, rs, geomCol, recordCount, outputStream, fileNameWithoutExt);
+                    doExport(progress, rs, geomCol, recordCount, outputStream, fileNameWithoutExt, geomMetadata.second().SRID);
                 }
 
         } finally {
@@ -194,12 +194,12 @@ public class FGBWriteDriver {
         }
     }
 
-    private String doExport(ProgressVisitor progress, ResultSet rs, String geometryColumn,  int recordCount, FileOutputStream outputStream, String fileName) throws SQLException, IOException {
+    private String doExport(ProgressVisitor progress, ResultSet rs, String geometryColumn,  int recordCount, FileOutputStream outputStream, String fileName, int srid) throws SQLException, IOException {
 
         FlatBufferBuilder bufferBuilder = new FlatBufferBuilder();
 
         //Write the header
-        HeaderMeta header = writeHeader(outputStream, fileName, bufferBuilder, recordCount, geometryColumn, rs.getMetaData());
+        HeaderMeta header = writeHeader(outputStream, fileName, bufferBuilder, recordCount, geometryColumn, rs.getMetaData(), srid);
 
         long endHeaderPosition = outputStream.getChannel().position();
         //Columns numbers
@@ -357,9 +357,10 @@ public class FGBWriteDriver {
      * @param fileName name of the file
      * @param rowCount number of rows
      * @param metadata flatbuffer metadata
+     * @param srid srid value
      * @return flatbuffer header object
      */
-    private HeaderMeta writeHeader(FileOutputStream outputStream, String fileName, FlatBufferBuilder bufferBuilder, long rowCount, String geometryColumn, ResultSetMetaData metadata) throws SQLException, IOException {
+    private HeaderMeta writeHeader(FileOutputStream outputStream, String fileName, FlatBufferBuilder bufferBuilder, long rowCount, String geometryColumn, ResultSetMetaData metadata, int srid) throws SQLException, IOException {
         outputStream.write(Constants.MAGIC_BYTES);
         HeaderMeta headerMeta = new HeaderMeta();
         //Get the column information
@@ -374,7 +375,11 @@ public class FGBWriteDriver {
                     headerMeta.hasZ = geomMeta.hasZ;
                     headerMeta.hasM = geomMeta.hasM;
                     headerMeta.geometryType = geometryType(geomMeta.geometryType);
-                    headerMeta.srid = geomMeta.SRID;
+                    if(srid==0){
+                        headerMeta.srid = geomMeta.SRID;
+                    }else {
+                        headerMeta.srid = srid;
+                    }
                 }
                 continue;
             }
