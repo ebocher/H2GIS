@@ -35,6 +35,12 @@ public class ST_SubDivide extends DeterministicScalarFunction {
      * @return Geometry
      */
     public static Geometry divide(Geometry geom, int maxvertices) {
+        if(geom ==null){
+            return null;
+        }
+        if(geom.isEmpty()){
+            return geom;
+        }
         Geometry res = FACTORY.buildGeometry(subdivide_recursive(geom, maxvertices));
         res.setSRID(geom.getSRID());
         return res;
@@ -52,11 +58,17 @@ public class ST_SubDivide extends DeterministicScalarFunction {
         if(geom ==null){
             return null;
         }
+        if (geom.isEmpty()){
+            return null;
+        }
         maxvertices = Math.max(0, maxvertices);
         Stack<Geometry> stack = new Stack<>();
         int size = geom.getNumGeometries();
         for (int i = 0; i < size; i++) {
-            stack.add(geom.getGeometryN(i));
+            Geometry subGeom = geom.getGeometryN(i);
+            if(!subGeom.isEmpty()) {
+                stack.add(subGeom);
+            }
         }
         List<Geometry> results = new ArrayList<>();
         while (!stack.isEmpty()) {
@@ -114,11 +126,14 @@ public class ST_SubDivide extends DeterministicScalarFunction {
         if(geom ==null){
             return null;
         }
+        if(geom.isEmpty()){
+            return geom;
+        }
         List<Geometry> results = new ArrayList();
         int size = geom.getNumGeometries();
         for (int i = 0; i < size; i++) {
             Geometry subGeom = geom.getGeometryN(i);
-            if (subGeom instanceof Polygon || subGeom instanceof LineString) {
+            if (!subGeom.isEmpty() && (subGeom instanceof Polygon || subGeom instanceof LineString)) {
                 final Envelope envelope = subGeom.getEnvelopeInternal();
                 double minX = envelope.getMinX();
                 double maxX = envelope.getMaxX();

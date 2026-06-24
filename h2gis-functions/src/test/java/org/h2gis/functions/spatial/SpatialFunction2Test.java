@@ -24,8 +24,10 @@ package org.h2gis.functions.spatial;
 import org.h2.jdbc.JdbcSQLException;
 import org.h2.jdbc.JdbcSQLNonTransientException;
 import org.h2gis.functions.factory.H2GISDBFactory;
+import org.h2gis.functions.spatial.split.ST_SubDivide;
 import org.junit.jupiter.api.*;
 import org.locationtech.jts.geom.Geometry;
+import org.locationtech.jts.io.WKTReader;
 
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -1220,6 +1222,15 @@ public class SpatialFunction2Test {
         assertGeometryEquals("SRID=4326;MULTILINESTRING ((-200 200, 0 200), (0 200, 200 200))",
                 rs.getObject(1));
         rs.close();
+    }
+
+    @Test
+    public void test_ST_SUBDIVIDE8() throws Exception {
+        WKTReader wktReader =  new WKTReader();
+        Geometry geom = wktReader.read("MULTIPOLYGON (EMPTY, \n" +
+                "  ((210 140, 280 140, 280 100, 210 100, 210 140)))");
+        Geometry res =  ST_SubDivide.divide(geom);
+        assertEquals(5, res.getNumGeometries());
     }
 
     @Test
